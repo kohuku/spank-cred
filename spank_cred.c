@@ -7,6 +7,10 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <errno.h>
+#include <sys/time.h>
+#include <time.h>
+
+
 
 #define PORT 12345
 #define BUFFER_SIZE 1024
@@ -52,21 +56,14 @@ int send_message_to_dpu(char *message){
 
     // サーバーに接続
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-        slurm_error("\n接続失敗: %s\n", strerror(errno));
+        slurm_info("DPUとの接続失敗: %s", strerror(errno));
         close(sock);
         return 0;
     }
+    
 
-    FILE *file;
-
-    file = fopen("/home/test/tmpfile", "w");
-    if (file == NULL) {
-        slurm_error("Failed to open /home/test/tmpfile for writing");
-        return 1;
-    }
     // データを送信
     send(sock, message, strlen(message), 0);
-    fprintf(file,"メッセージが送信されました: %s\n", message);
 
     // ソケットを閉じる
     close(sock);
@@ -76,12 +73,18 @@ int slurm_spank_user_init(spank_t sp, int ac, char **av) {
 
     pid_t pid;
     uid_t uid;
+    uint32_t job_id;
     char message[BUFFER_SIZE];  // 送信するデータ
+    spank_err_t err;
+
+    // プロセスIDとユーザーIDの取得
     pid = getpid();
     uid = geteuid();
-
+    
+    
+    err = spank_get_item(sp,S_JOB_ID,&job_id);
     seteuid(0);
-    snprintf(message, BUFFER_SIZE, "%d %d", pid, uid);
+    snprintf(message, BUFFER_SIZE, "%d %d %d", pid, uid, job_id);
     send_message_to_dpu(message);
     seteuid(uid);
 
@@ -94,6 +97,17 @@ int slurm_spank_exit(spank_t sp, int ac, char **av) {
     char message[BUFFER_SIZE];  // 送信するデータ
     pid = getpid();
     uid = geteuid();
+    struct timeval tv;
+    struct tm *timeinfo;
+
+    // 現在時刻の取得（秒とマイクロ秒）
+    gettimeofday(&tv, NULL);
+    timeinfo = localtime(&tv.tv_sec);  // ローカルタイムに変換
+    slurm_info("PID: %d, Time: %04d-%02d-%02d %02d:%02d:%02d.%06ld",
+             pid,
+             timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
+             timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec,
+             tv.tv_usec);  // マイクロ秒をミリ秒に変換
 
     seteuid(0);
     snprintf(message, BUFFER_SIZE, "%d",pid);
